@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Cobra MK3 - Докировка</title>
+    <title>Cobra MK3 - Докировка v2</title>
     <style>
         body {
             margin: 0;
@@ -129,11 +129,27 @@
             z-index: 30;
             text-shadow: 0 0 2px black;
         }
+        .docking-status {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 24px;
+            font-weight: bold;
+            font-family: monospace;
+            pointer-events: none;
+            z-index: 50;
+            text-shadow: 0 0 10px black;
+            white-space: nowrap;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
         @media (max-width: 600px) {
             .ctrl-btn { width: 55px; height: 55px; line-height: 51px; font-size: 20px; }
             .controls-panel { right: 10px; gap: 15px; }
             .distance-bar-container { width: 100px; right: 10px; }
             .distance-text { right: 120px; font-size: 9px; top: 70px; }
+            .docking-status { font-size: 18px; white-space: nowrap; }
         }
         .flash-overlay {
             position: fixed;
@@ -151,7 +167,7 @@
 <body>
 
     <div id="ui">
-        <div>⚡ СКОРОСТЬ: <span id="speed-value">0</span></div>
+        <div>⚡ СКОРОСТЬ: <span id="speed-value">0.00</span></div>
         <div>🎯 СТАНЦИЯ: <span id="distance-value">--</span></div>
     </div>
     <div class="distance-text">ДИСТАНЦИЯ</div>
@@ -169,6 +185,7 @@
     <div class="speed-hint">⬅️ Слайдер скорости (левый нижний угол) | ПК: W/S A/D , .</div>
     
     <div id="flashOverlay" class="flash-overlay"></div>
+    <div id="dockingStatus" class="docking-status"></div>
 
     <script>
         (function() {
@@ -180,19 +197,15 @@
             let width = window.innerWidth;
             let height = window.innerHeight;
             
-            // ======================== 2. ЗВЕЗДЫ (РЕАЛИСТИЧНАЯ ФИЗИКА) ========================
+            // ======================== 2. ЗВЕЗДЫ (ПРАВИЛЬНОЕ ДВИЖЕНИЕ) ========================
             const stars = [];
             for (let i = 0; i < 400; i++) {
-                // Распределяем звезды на разные глубины (zOffset)
-                const depthFactor = Math.random(); // 0..1, дальше = ближе к 1
                 stars.push({
                     x: (Math.random() - 0.5) * 2000,
                     y: (Math.random() - 0.5) * 2000,
                     z: (Math.random() - 0.5) * 800,
                     size: 0.8 + Math.random() * 1.5,
-                    // Фактор дальности: чем дальше звезда (чем выше z), тем медленнее она движется
-                    // Нормализуем z в диапазон 0-1 (дальние к 1)
-                    parallaxFactor: Math.random() * 0.8 + 0.2 // 0.2 - 1.0, дальние двигаются медленно
+                    parallaxFactor: 0.3 + Math.random() * 0.7 // 0.3-1.0, ближние быстрее
                 });
             }
             
@@ -247,37 +260,37 @@
             let asteroids = [new Asteroid(), new Asteroid(), new Asteroid(), new Asteroid()];
             
             // ======================== 6. ФИЗИКА ========================
-            let pitchAngle = 0;      // Тангаж
-            let rollAngle = 0;       // Крен
+            let pitchAngle = 0;
+            let rollAngle = 0;
             
-            let pitchVelocity = 0;   // Скорость тангажа
-            let rollVelocity = 0;    // Скорость крена
+            let pitchVelocity = 0;
+            let rollVelocity = 0;
             
             let speed = 0;
             let targetSpeed = 0;
             let stationZ = 18;
             let docked = false;
-            let flashColor = '';
             let flashOpacity = 0;
+            let flashColor = '#fff';
             
             // Параметры инерции
             const ANGULAR_ACCEL = 0.003;
             const ANGULAR_DAMP = 0.98;
-            const MAX_VEL = 0.08;
+            const MAX_VEL = 0.06;  // Чуть медленнее для ПК
             
             // Дублирующие кнопки и клавиатура
             let manualRollLeft = false;
             let manualRollRight = false;
             let manualPitchUp = false;
             let manualPitchDown = false;
-            const MANUAL_ROLL_SPEED = 0.04;
-            const MANUAL_PITCH_SPEED = 0.03;
+            const MANUAL_ROLL_SPEED = 0.025;  // Медленнее для ПК
+            const MANUAL_PITCH_SPEED = 0.02;   // Медленнее для ПК
             
             // Гироскоп
             let gyroActive = false;
             let targetPitchRate = 0;
             let targetRollRate = 0;
-            const GYRO_SENSITIVITY = 0.006;
+            const GYRO_SENSITIVITY = 0.005;
             
             // Элементы UI
             const enableBtn = document.getElementById('enableGyroBtn');
@@ -288,6 +301,7 @@
             const distanceSpan = document.getElementById('distance-value');
             const distanceBar = document.getElementById('distanceBar');
             const flashOverlay = document.getElementById('flashOverlay');
+            const dockingStatusDiv = document.getElementById('dockingStatus');
             
             // ======================== 7. ФУНКЦИИ ПОВОРОТА ========================
             function rotateX(v, angle) {
@@ -308,13 +322,10 @@
             // ======================== 8. ГИРОСКОП ========================
             function handleOrientation(event) {
                 if (!gyroActive) return;
-                
                 let beta = event.beta || 0;
                 let gamma = event.gamma || 0;
-                
                 beta = Math.min(45, Math.max(-45, beta)) / 45;
                 gamma = Math.min(45, Math.max(-45, gamma)) / 45;
-                
                 targetPitchRate = beta * GYRO_SENSITIVITY;
                 targetRollRate = gamma * GYRO_SENSITIVITY;
             }
@@ -322,7 +333,6 @@
             function requestGyroAccess() {
                 gyroStatusDiv.innerText = "🔄 Запрашиваем разрешение...";
                 gyroStatusDiv.style.color = "yellow";
-                
                 const handleSuccess = () => {
                     window.addEventListener('deviceorientation', handleOrientation);
                     gyroActive = true;
@@ -330,14 +340,12 @@
                     gyroStatusDiv.style.color = "#0f0";
                     if(enableBtn) enableBtn.style.display = 'none';
                 };
-                
                 const handleError = (e) => {
                     gyroStatusDiv.innerText = "⚠️ Гироскоп не доступен (Используй кнопки/клавиатуру)";
                     gyroStatusDiv.style.color = "orange";
                     if(enableBtn) enableBtn.style.display = 'none';
                     gyroActive = false;
                 };
-                
                 if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission !== 'function') {
                     window.addEventListener('deviceorientation', handleOrientation);
                     gyroActive = true;
@@ -345,7 +353,6 @@
                     if(enableBtn) enableBtn.style.display = 'none';
                     return;
                 }
-                
                 if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                     DeviceOrientationEvent.requestPermission()
                         .then(permissionState => {
@@ -363,13 +370,9 @@
                     handleError(new Error("Not supported"));
                 }
             }
+            if (enableBtn) enableBtn.addEventListener('click', requestGyroAccess);
             
-            if (enableBtn) {
-                enableBtn.addEventListener('click', requestGyroAccess);
-            }
-            
-            // ======================== 9. УПРАВЛЕНИЕ (КНОПКИ + КЛАВИАТУРА) ========================
-            // Кнопки крена
+            // ======================== 9. УПРАВЛЕНИЕ ========================
             rollLeftBtn.addEventListener('touchstart', (e) => { e.preventDefault(); manualRollLeft = true; });
             rollLeftBtn.addEventListener('touchend', () => { manualRollLeft = false; });
             rollLeftBtn.addEventListener('mousedown', () => { manualRollLeft = true; });
@@ -380,31 +383,28 @@
             rollRightBtn.addEventListener('mousedown', () => { manualRollRight = true; });
             rollRightBtn.addEventListener('mouseup', () => { manualRollRight = false; });
             
-            // Клавиатура (ПК)
+            // Клавиатура с плавным ускорением
+            let keyboardPitch = 0;
+            let keyboardRoll = 0;
             window.addEventListener('keydown', (e) => {
                 const key = e.key;
-                // Тангаж: W / S
-                if (key === 'w' || key === 'W') { manualPitchUp = true; e.preventDefault(); }
-                if (key === 's' || key === 'S') { manualPitchDown = true; e.preventDefault(); }
-                // Крен: A / D
-                if (key === 'a' || key === 'A') { manualRollLeft = true; e.preventDefault(); }
-                if (key === 'd' || key === 'D') { manualRollRight = true; e.preventDefault(); }
-                // Скорость: , (запятая) и . (точка)
-                if (key === ',') { targetSpeed = Math.max(0, targetSpeed - 0.3); e.preventDefault(); }
-                if (key === '.') { targetSpeed = Math.min(5.5, targetSpeed + 0.3); e.preventDefault(); }
+                if (key === 'w' || key === 'W') { keyboardPitch = -MANUAL_PITCH_SPEED; e.preventDefault(); }
+                if (key === 's' || key === 'S') { keyboardPitch = MANUAL_PITCH_SPEED; e.preventDefault(); }
+                if (key === 'a' || key === 'A') { keyboardRoll = -MANUAL_ROLL_SPEED; e.preventDefault(); }
+                if (key === 'd' || key === 'D') { keyboardRoll = MANUAL_ROLL_SPEED; e.preventDefault(); }
+                if (key === ',') { targetSpeed = Math.max(0, targetSpeed - 0.15); e.preventDefault(); }
+                if (key === '.') { targetSpeed = Math.min(5.5, targetSpeed + 0.15); e.preventDefault(); }
             });
-            
             window.addEventListener('keyup', (e) => {
                 const key = e.key;
-                if (key === 'w' || key === 'W') { manualPitchUp = false; }
-                if (key === 's' || key === 'S') { manualPitchDown = false; }
-                if (key === 'a' || key === 'A') { manualRollLeft = false; }
-                if (key === 'd' || key === 'D') { manualRollRight = false; }
+                if (key === 'w' || key === 'W') { keyboardPitch = 0; }
+                if (key === 's' || key === 'S') { keyboardPitch = 0; }
+                if (key === 'a' || key === 'A') { keyboardRoll = 0; }
+                if (key === 'd' || key === 'D') { keyboardRoll = 0; }
             });
             
             // ======================== 10. СЛАЙДЕР СКОРОСТИ ========================
             let isSpeedSliding = false;
-            
             canvas.addEventListener('touchstart', (e) => {
                 const touch = e.touches[0];
                 const x = touch.clientX;
@@ -415,47 +415,61 @@
                     e.preventDefault();
                 }
             });
-            
             canvas.addEventListener('touchmove', (e) => {
                 if (isSpeedSliding) {
                     updateSpeed(e.touches[0].clientY);
                     e.preventDefault();
                 }
             });
-            
             canvas.addEventListener('touchend', () => { isSpeedSliding = false; });
             
             function updateSpeed(y) {
                 let relativeY = Math.max(0, Math.min(1, (y - height/2) / (height/2)));
                 let norm = 1 - relativeY;
                 targetSpeed = Math.min(5.5, Math.max(0, norm * 5.5));
-                if (speedValueSpan) speedValueSpan.innerText = targetSpeed.toFixed(1);
+                if (speedValueSpan) speedValueSpan.innerText = targetSpeed.toFixed(2);
             }
             
             // ======================== 11. СТЫКОВКА ========================
+            let lastDockingAttempt = 0;
+            
+            function showDockingMessage(text, isSuccess) {
+                dockingStatusDiv.style.opacity = '1';
+                dockingStatusDiv.style.color = isSuccess ? '#0f0' : '#f00';
+                dockingStatusDiv.innerHTML = text;
+                setTimeout(() => {
+                    dockingStatusDiv.style.opacity = '0';
+                }, 1500);
+            }
+            
             function checkDocking() {
                 if (docked) return;
                 const distance = Math.abs(stationZ);
-                // Условия стыковки: дистанция меньше 1.5, скорость меньше 0.8, угол поворота корабля небольшой
-                const isAligned = Math.abs(pitchAngle) < 0.3 && Math.abs(rollAngle) < 0.3;
-                if (distance < 1.8 && speed < 0.8 && isAligned) {
+                // Условия стыковки: дистанция меньше 1.8, скорость меньше 0.6, угол поворота корабля небольшой
+                const isAligned = Math.abs(pitchAngle) < 0.4 && Math.abs(rollAngle) < 0.4;
+                
+                if (distance < 2.0 && speed < 0.6 && isAligned) {
                     // Успешная стыковка
                     docked = true;
                     flashColor = '#0f0';
                     flashOpacity = 1;
+                    showDockingMessage("✅ СТЫКОВКА УСПЕШНА! ✅", true);
                     targetSpeed = 0;
                     speed = 0;
-                    stationZ = 18; // Сброс позиции станции для следующей попытки
+                    stationZ = 22;
                     setTimeout(() => { docked = false; }, 2000);
-                } else if (distance < 1.2 && speed >= 0.8) {
-                    // Неудачная стыковка (удар)
-                    flashColor = '#f00';
-                    flashOpacity = 0.8;
-                    // Отброс корабля назад
-                    speed = -1.5;
-                    targetSpeed = 0;
-                    stationZ += 2.5;
-                    setTimeout(() => { flashOpacity = 0; }, 300);
+                } else if (distance < 1.5 && speed >= 0.6) {
+                    // Неудачная стыковка
+                    if (Date.now() - lastDockingAttempt > 1000) {
+                        lastDockingAttempt = Date.now();
+                        flashColor = '#f00';
+                        flashOpacity = 0.8;
+                        showDockingMessage("💥 СТОЛКНОВЕНИЕ! 💥", false);
+                        speed = -1.2;
+                        targetSpeed = 0;
+                        stationZ += 2.5;
+                        setTimeout(() => { flashOpacity = 0; }, 400);
+                    }
                 }
             }
             
@@ -475,19 +489,18 @@
                 } else {
                     speed *= 0.95;
                 }
-                if (stationZ < 2.0) stationZ = 2.0;
+                if (stationZ < 1.8) stationZ = 1.8;
                 if (stationZ > 40) stationZ = 40;
                 
-                // === ФИЗИКА ВРАЩЕНИЯ (ГИРОСКОП + КЛАВИАТУРА/КНОПКИ) ===
+                // === ФИЗИКА ВРАЩЕНИЯ ===
                 if (gyroActive) {
                     pitchVelocity += (targetPitchRate - pitchVelocity) * 0.1;
                     rollVelocity += (targetRollRate - rollVelocity) * 0.1;
                 } else {
                     // Ручное управление с кнопок и клавиатуры
-                    if (manualPitchUp) pitchVelocity -= MANUAL_PITCH_SPEED;
-                    if (manualPitchDown) pitchVelocity += MANUAL_PITCH_SPEED;
-                    if (manualRollLeft) rollVelocity -= MANUAL_ROLL_SPEED;
-                    if (manualRollRight) rollVelocity += MANUAL_ROLL_SPEED;
+                    pitchVelocity += keyboardPitch;
+                    rollVelocity += manualRollLeft ? -MANUAL_ROLL_SPEED : (manualRollRight ? MANUAL_ROLL_SPEED : 0);
+                    rollVelocity += keyboardRoll;
                     pitchVelocity *= ANGULAR_DAMP;
                     rollVelocity *= ANGULAR_DAMP;
                 }
@@ -522,12 +535,12 @@
                 ctx.fillStyle = 'black';
                 ctx.fillRect(0, 0, width, height);
                 
-                // Звезды (реалистичное движение: дальние почти не двигаются)
+                // Звезды (движутся НАВСТРЕЧУ при движении вперёд)
                 ctx.fillStyle = 'white';
                 stars.forEach(s => {
-                    // Чем дальше звезда, тем меньше влияние скорости
-                    let speedEffect = 1 + speed * s.parallaxFactor * 1.2;
-                    let z = s.z + speedEffect;
+                    // Скорость движения звезды обратно пропорциональна дальности
+                    let speedEffect = speed * s.parallaxFactor * 1.5;
+                    let z = s.z - speedEffect;  // МИНУС, чтобы звёзды набегали при движении вперёд
                     if (z > 600) z = -600;
                     if (z < -600) z = 600;
                     s.z = z;
@@ -536,14 +549,13 @@
                     let y2d = (s.y * 280) / (z + 450) + height/2;
                     if (x2d > -50 && x2d < width + 50 && y2d > -50 && y2d < height + 50) {
                         ctx.beginPath();
-                        // Ближние звезды рисуем больше
-                        const starSize = s.size * (1 + (1 - s.parallaxFactor) * 0.5);
+                        const starSize = s.size * (0.8 + (1 - s.parallaxFactor) * 0.5);
                         ctx.arc(x2d, y2d, starSize, 0, Math.PI * 2);
                         ctx.fill();
                     }
                 });
                 
-                // Трансформация (сначала крен, потом тангаж)
+                // Трансформация
                 const transform = (v) => rotateX(rotateZ(v, rollAngle), pitchAngle);
                 
                 // Корабль
@@ -626,7 +638,7 @@
                 ctx.lineTo(cx, cy+5);
                 ctx.stroke();
                 
-                // Индикатор расстояния (полоска и цифры)
+                // Индикатор расстояния (полоска)
                 let dist = Math.abs(stationZ);
                 let maxDist = 20;
                 let percent = Math.min(100, (dist / maxDist) * 100);
@@ -640,9 +652,9 @@
                     distanceBar.style.backgroundColor = '#0f0';
                 }
                 
-                // Обновляем отображение скорости на UI
+                // Обновляем отображение скорости
                 if (speedValueSpan && !isSpeedSliding) {
-                    speedValueSpan.innerText = targetSpeed.toFixed(1);
+                    speedValueSpan.innerText = targetSpeed.toFixed(2);
                 }
                 
                 requestAnimationFrame(draw);
